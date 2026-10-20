@@ -1,0 +1,211 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Laboratorio di Fisica - Misura della Forza</title>
+    <!-- Chart.js per i grafici -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <!-- Libreria Ufficiale Vernier GoDirect JS -->
+    <script src="https://unpkg.com/@vernier/godirect@1.5.0/dist/godirect.min.js"></script>
+    
+    <style>
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; margin: 20px; background-color: #f8f9fa; color: #333; }
+        .container { max-width: 900px; margin: auto; background: white; padding: 25px; border-radius: 12px; box-shadow: 0 4px 15px rgba(0,0,0,0.1); }
+        h1, h2 { color: #0056b3; }
+        .instructions { background: #e9ecef; padding: 15px; border-radius: 8px; border-left: 5px solid #0056b3; margin-bottom: 20px; }
+        .controls { margin: 20px 0; display: flex; gap: 10px; align-items: center; }
+        button { padding: 10px 18px; font-size: 15px; border: none; border-radius: 6px; cursor: pointer; transition: 0.2s; font-weight: bold; }
+        .btn-primary { background: #0056b3; color: white; }
+        .btn-success { background: #28a745; color: white; }
+        .btn-danger { background: #dc3545; color: white; }
+        .btn-secondary { background: #6c757d; color: white; }
+        button:disabled { background: #ccc; cursor: not-allowed; }
+        .status { font-weight: bold; margin-left: 10px; }
+        .chart-container { position: relative; height: 350px; width: 100%; margin: 20px 0; }
+        .question-box { margin-top: 25px; }
+        textarea { width: 100%; height: 80px; margin-top: 5px; padding: 10px; border-radius: 6px; border: 1px solid #ccc; font-family: inherit; }
+        @media print {
+            .controls, button { display: none !important; }
+            body { background: white; }
+            .container { box-shadow: none; width: 100%; max-width: 100%; }
+        }
+    </style>
+</head>
+<body>
+
+<div class="container" id="report-content">
+    <h1>🔬 Scheda di Laboratorio: Misura della Forza</h1>
+    <p><strong>Classe:</strong> 1ª Liceo Scientifico Scienze Applicate | <strong>Materia:</strong> Fisica</p>
+
+    <!-- 1. ISTRUZIONI E GUIDA DELL'ATTIVITÀ -->
+    <div class="instructions">
+        <h2>📋 Istruzioni per l'attività</h2>
+        <ol>
+            <li>Accendi il sensore Vernier Go Direct (LED lampeggiante rosso).</li>
+            <li>Clicca su <strong>"Connetti Sensore Bluetooth"</strong> e seleziona il dispositivo dalla finestra.</li>
+            <li>Effettua la **tara** (senza applicare carichi) cliccando su <strong>"Zero / Tara"</strong>.</li>
+            <li>Clicca su <strong>"Avvia Acquisizione"</strong> e applica la forza (es. trazione su molla o rottura spaghetto).</li>
+            <li>Compila la relazione finale e scarica il report in PDF o i dati in CSV.</li>
+        </ol>
+    </div>
+
+    <!-- 2. CONTROLLI SENSORI E CONNESSIONE -->
+    <div class="controls">
+        <button id="btn-connect" class="btn-primary">🔍 Connetti Sensore</button>
+        <button id="btn-zero" class="btn-secondary" disabled>⚖️ Zero / Tara</button>
+        <button id="btn-start" class="btn-success" disabled>▶️ Avvia Acquisizione</button>
+        <button id="btn-stop" class="btn-danger" disabled>⏹️ Ferma</button>
+        <span class="status" id="status-text">Stato: Disconnesso</span>
+    </div>
+
+    <!-- 3. GRAFICO IN TEMPO REALE -->
+    <div class="chart-container">
+        <canvas id="forceChart"></canvas>
+    </div>
+
+    <!-- 4. DOMANDE E RELAZIONE -->
+    <div class="question-box">
+        <h2>📝 Relazione dell'Esperienza</h2>
+        
+        <label><strong>Nome e Cognome Studenti:</strong></label>
+        <input type="text" id="student-names" style="width:100%; padding:8px; margin: 5px 0 15px 0; border-radius:4px; border:1px solid #ccc;" placeholder="Es. Mario Rossi, Luca Bianchi">
+
+        <label><strong>1. Osservazioni sul grafico:</strong> Descrivi l'andamento della forza nel tempo e individua il valore massimo raggiunto.</label>
+        <textarea id="q1" placeholder="Scrivi qui la tua risposta..."></textarea>
+
+        <label style="margin-top:15px; display:block;"><strong>2. Valutazione degli Errori:</strong> Quali sono state le principali fonti di incertezza durante la misura?</label>
+        <textarea id="q2" placeholder="Scrivi qui la tua risposta..."></textarea>
+    </div>
+
+    <!-- 5. ESPORTAZIONE DATI E REPORT -->
+    <div class="controls" style="margin-top: 30px;">
+        <button id="btn-export-csv" class="btn-secondary">💾 Scarica Dati (CSV)</button>
+        <button id="btn-print" class="btn-primary">🖨️ Stampa / Salva in PDF</button>
+    </div>
+</div>
+
+<script>
+    let gdxDevice = null;
+    let forceSensor = null;
+    let isRecording = false;
+    let startTime = 0;
+    let offset = 0;
+    
+    let timeData = [];
+    let forceData = [];
+
+    // Configurazione Grafico Chart.js
+    const ctx = document.getElementById('forceChart').getContext('2d');
+    const chart = new Chart(ctx, {
+        type: 'line',
+        data: {
+            labels: timeData,
+            datasets: [{
+                label: 'Forza (N)',
+                data: forceData,
+                borderColor: '#0056b3',
+                borderWidth: 2,
+                fill: false,
+                tension: 0.1,
+                pointRadius: 1
+            }]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            scales: {
+                x: { title: { display: true, text: 'Tempo (s)' } },
+                y: { title: { display: true, text: 'Forza (N)' } }
+            }
+        }
+    });
+
+    // 1. Connessione Bluetooth Vernier GoDirect
+    document.getElementById('btn-connect').addEventListener('click', async () => {
+        try {
+            document.getElementById('status-text').innerText = "Stato: Ricerca dispositivo...";
+            gdxDevice = await godirect.selectDevice();
+            
+            // Trova il primo sensore di forza disponibile
+            forceSensor = gdxDevice.sensors.find(s => s.name.toLowerCase().includes('force') || s.unit === 'N');
+            if (!forceSensor) forceSensor = gdxDevice.sensors[0];
+
+            forceSensor.enabled = true;
+            
+            document.getElementById('status-text').innerText = `Stato: Connesso a ${gdxDevice.name}`;
+            document.getElementById('btn-start').disabled = false;
+            document.getElementById('btn-zero').disabled = false;
+            document.getElementById('btn-connect').disabled = true;
+        } catch (err) {
+            console.error(err);
+            document.getElementById('status-text').innerText = "Stato: Errore o connessione annullata";
+        }
+    });
+
+    // 2. Tara / Zero
+    document.getElementById('btn-zero').addEventListener('click', () => {
+        if (forceSensor) {
+            offset = forceSensor.value || 0;
+            alert(`Tara effettuata! Offset: ${offset.toFixed(3)} N`);
+        }
+    });
+
+    // 3. Gestione Acquisizione Dati
+    document.getElementById('btn-start').addEventListener('click', () => {
+        timeData.length = 0;
+        forceData.length = 0;
+        chart.update();
+        
+        isRecording = true;
+        startTime = Date.now();
+
+        document.getElementById('btn-start').disabled = true;
+        document.getElementById('btn-stop').disabled = false;
+        document.getElementById('status-text').innerText = "Stato: Acquisizione in corso...";
+
+        // Event listener della libreria godirect-js per nuovi dati
+        gdxDevice.on('device-sensor-value-changed', (device) => {
+            if (isRecording && forceSensor) {
+                const now = (Date.now() - startTime) / 1000;
+                const val = (forceSensor.value - offset);
+
+                timeData.push(now.toFixed(2));
+                forceData.push(val.toFixed(3));
+
+                chart.update('none'); // Aggiornamento fluido
+            }
+        });
+    });
+
+    document.getElementById('btn-stop').addEventListener('click', () => {
+        isRecording = false;
+        chart.update();
+        document.getElementById('btn-start').disabled = false;
+        document.getElementById('btn-stop').disabled = true;
+        document.getElementById('status-text').innerText = "Stato: Acquisizione terminata";
+    });
+
+    // 4. Esportazione CSV dei dati grezzi
+    document.getElementById('btn-export-csv').addEventListener('click', () => {
+        let csvContent = "data:text/csv;charset=utf-8,Tempo(s),Forza(N)\n";
+        for (let i = 0; i < timeData.length; i++) {
+            csvContent += `${timeData[i]},${forceData[i]}\n`;
+        }
+        const encodedUri = encodeURI(csvContent);
+        const link = document.createElement("a");
+        link.setAttribute("href", encodedUri);
+        link.setAttribute("download", "dati_forza_laboratorio.csv");
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+    });
+
+    // 5. Salva Report / PDF
+    document.getElementById('btn-print').addEventListener('click', () => {
+        window.print();
+    });
+</script>
+
+</body>
+</html>
